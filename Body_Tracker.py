@@ -4,6 +4,10 @@ import numpy as np
 import math as math
 import time
 
+
+angle_list = []
+squat_count = 0
+
 def squat_angle(r_ankle, r_hip, r_knee):
   v1 = [r_hip.x- r_knee.x, r_hip.y- r_knee.y, r_hip.z- r_knee.z]
   v2 = [r_ankle.x- r_knee.x, r_ankle.y- r_knee.y, r_ankle.z- r_knee.z]
@@ -25,7 +29,6 @@ def is_Squat(angle):
   if(angle < 85):
     squat_bool = True
   return squat_bool
-
 
 
 
@@ -62,12 +65,29 @@ if __name__ == '__main__':
           right_hip = results.pose_world_landmarks.landmark[24]
           right_ankle = results.pose_world_landmarks.landmark[28]
           angle = squat_angle(right_ankle, right_hip, right_knee)
+          angle_list.append(angle)
           isSquat = is_Squat(angle)
           if isSquat:
             print("Successful Squat")
 
       if cv2.waitKey(5) & 0xFF == 27:
         break
+  
+  def count_squats(list):
+      squat_count = 0
+      in_squat = False
+      for angle in list:
+          if angle < 85:
+              if not in_squat:
+                  squat_count += 1
+                  in_squat = True
+          else:
+              in_squat = False
+
+      return squat_count
+  reps = count_squats(angle_list)   
+  print(f'you completed {reps} squat reps')
+  
   cap.release()
   
     
