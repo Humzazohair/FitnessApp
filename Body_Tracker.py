@@ -25,10 +25,7 @@ def squat_angle(r_ankle, r_hip, r_knee):
   return angle
 
 def is_Squat(angle):
-  squat_bool = False
-  if(angle < 85):
-    squat_bool = True
-  return squat_bool
+  return angle < 85
 
 
 
