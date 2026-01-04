@@ -31,8 +31,9 @@ class ExerciseClassifier:
         self.model.to(self.device)
         self.model.eval()
         
-        self.class_to_exercise = checkpoint['class_to_exercise']
-        print(f"Model loaded! Classes: {list(self.class_to_exercise.values())}")
+        # class mapping saved as 'class_to_label' in training
+        self.class_to_label = checkpoint.get('class_to_label', {})
+        print(f"Model loaded! Labels: {list(self.class_to_label.values())}")
         
         # MediaPipe setup
         self.mp_pose = mp.solutions.pose
@@ -68,11 +69,12 @@ class ExerciseClassifier:
         # Predict
         with torch.no_grad():
             output = self.model(sequence_tensor)
-            probabilities = torch.softmax(output, dim=1)
-            confidence, predicted = torch.max(probabilities, 1)
-            
-        exercise = self.class_to_exercise[predicted.item()]
-        return exercise, confidence.item()
+            # multi-label: use sigmoid to get per-label confidences
+            confidences = torch.sigmoid(output).squeeze(0).cpu().numpy()
+
+        # return mapping of label -> confidence
+        label_conf = {self.class_to_label.get(i, str(i)): float(confidences[i]) for i in range(len(confidences))}
+        return label_conf
     
     def process_frame(self, frame):
         """Process a single frame and return annotated frame with prediction."""
@@ -92,16 +94,23 @@ class ExerciseClassifier:
             
             # Add to buffer
             self.landmark_buffer.append(landmarks)
-            
+
             # Predict if we have enough frames
-            exercise, confidence = self.predict(landmarks)
-            
-            if exercise:
-                # Display prediction
-                text = f"{exercise.upper()}: {confidence*100:.1f}%"
-                color = (0, 255, 0) if confidence > 0.7 else (0, 165, 255)
+            label_conf = self.predict(landmarks)
+
+            if label_conf:
+                # show top labels by confidence
+                sorted_labels = sorted(label_conf.items(), key=lambda x: x[1], reverse=True)
+                display = []
+                for label, conf in sorted_labels:
+                    if conf > 0.02:  # small threshold for display
+                        display.append(f"{label}: {conf*100:.0f}%")
+                if display:
+                    text = ' | '.join(display[:4])
+                else:
+                    text = 'Collecting frames...'
                 cv2.putText(annotated_frame, text, (10, 40),
-                           cv2.FONT_HERSHEY_SIMPLEX, 1.2, color, 3)
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
             else:
                 cv2.putText(annotated_frame, "Collecting frames...", (10, 40),
                            cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)

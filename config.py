@@ -1,14 +1,14 @@
 from pathlib import Path
 
-SEQUENCE_LENGTH = 30
+SEQUENCE_LENGTH = 16
 INPUT_SIZE = 99  # 33 landmarks × 3 (x, y, visibility)
 HIDDEN_SIZE = 128
 NUM_LAYERS = 2
 BATCH_SIZE = 32
-EPOCHS = 50
+EPOCHS = 20
 LEARNING_RATE = 0.001
 TRAIN_TEST_SPLIT = 0.8
-MODEL_TYPE = 'lstm'
+MODEL_TYPE = 'transformer'  # Options: 'lstm', 'gru', 'transformer'
 FRAME_SKIP = 2
 VISUALIZE = True       # Set to True to see landmark detection (slower, for debugging)
 

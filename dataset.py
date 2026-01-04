@@ -18,7 +18,8 @@ class ExerciseDataset(Dataset):
         return len(self.sequences)
     
     def __getitem__(self, idx):
-        return torch.FloatTensor(self.sequences[idx]), torch.LongTensor([self.labels[idx]])[0]
+        # labels are expected to be a multi-hot vector (list/ndarray)
+        return torch.FloatTensor(self.sequences[idx]), torch.FloatTensor(self.labels[idx])
 
 
 class VideoProcessor:
@@ -132,35 +133,60 @@ class DataLoader:
         """Load all videos and extract sequences."""
         exercise_folders = [d for d in self.training_dir.iterdir() if d.is_dir()]
         exercise_names = sorted([d.name for d in exercise_folders])
-        
+
         if not exercise_names:
             raise ValueError(f"No exercise folders found in {self.training_dir}")
-        
-        # Create class mappings
-        exercise_to_class = {name: idx for idx, name in enumerate(exercise_names)}
-        class_to_exercise = {idx: name for name, idx in exercise_to_class.items()}
-        
-        all_sequences = []
-        all_labels = []
-        
-        # Process each exercise folder
+
+        # For each exercise, detect its defect/label subfolders (e.g. 'good', 'rounded_back')
+        exercise_data = {}
+
         for exercise_name in exercise_names:
             exercise_dir = self.training_dir / exercise_name
-            video_files = list(exercise_dir.glob('*.mp4')) + list(exercise_dir.glob('*.avi')) + \
-                         list(exercise_dir.glob('*.mov')) + list(exercise_dir.glob('*.mkv'))
-            
-            if not video_files:
-                print(f"⚠️  No videos found in {exercise_dir}")
+
+            # find subfolders inside the exercise folder; these represent labels
+            label_folders = [d for d in exercise_dir.iterdir() if d.is_dir()]
+
+            # If no label subfolders, treat video files directly as a single default label 'default'
+            if not label_folders:
+                label_names = ['default']
+                label_paths = { 'default': exercise_dir }
+            else:
+                label_names = sorted([d.name for d in label_folders])
+                label_paths = {name: exercise_dir / name for name in label_names}
+
+            label_to_index = {name: idx for idx, name in enumerate(label_names)}
+            class_to_label = {idx: name for name, idx in label_to_index.items()}
+
+            all_sequences = []
+            all_labels = []
+
+            # For each label, collect videos
+            for label_name, label_path in label_paths.items():
+                video_files = list(label_path.glob('*.mp4')) + list(label_path.glob('*.avi')) + \
+                              list(label_path.glob('*.mov')) + list(label_path.glob('*.mkv'))
+
+                if not video_files:
+                    # skip empty label folder but keep label mapping
+                    continue
+
+                for video_path in tqdm(video_files, desc=f"Processing {exercise_name}/{label_name}"):
+                    sequences = self.processor.process_video(video_path)
+                    if sequences:
+                        all_sequences.extend(sequences)
+                        # create multi-hot label vectors for each sequence (single-label examples set single bit)
+                        idx = label_to_index[label_name]
+                        for _ in range(len(sequences)):
+                            lbl = np.zeros(len(label_names), dtype=np.float32)
+                            lbl[idx] = 1.0
+                            all_labels.append(lbl)
+
+            if not all_sequences:
+                print(f"⚠️  No sequences found for exercise '{exercise_name}' - skipping")
                 continue
-            
-            # Process each video
-            for video_path in tqdm(video_files, desc=f"Processing {exercise_name}"):
-                sequences = self.processor.process_video(video_path)
-                if sequences:
-                    all_sequences.extend(sequences)
-                    all_labels.extend([exercise_to_class[exercise_name]] * len(sequences))
-        
-        if not all_sequences:
-            raise ValueError("No sequences extracted from videos")
-        
-        return all_sequences, all_labels, class_to_exercise
+
+            exercise_data[exercise_name] = (all_sequences, all_labels, class_to_label)
+
+        if not exercise_data:
+            raise ValueError("No sequences extracted from any exercise folders")
+
+        return exercise_data

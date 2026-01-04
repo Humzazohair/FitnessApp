@@ -7,8 +7,10 @@ class ModelTrainer:
     def __init__(self, model, device, learning_rate):
         self.model = model.to(device)
         self.device = device
+        # default to multi-class; caller can set multi_label flag before training
+        self.multi_label = False
         self.criterion = nn.CrossEntropyLoss()
-        self.optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+        self.optimizer = optim.Adam(self.model.parameters(), lr=learning_rate)
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer, mode='min', factor=0.5, patience=5
         )
@@ -26,16 +28,26 @@ class ModelTrainer:
             
             self.optimizer.zero_grad()
             outputs = self.model(sequences)
-            loss = self.criterion(outputs, labels)
+            # if multi-label, labels are floats and criterion should be BCEWithLogitsLoss
+            if self.multi_label:
+                loss = self.criterion(outputs, labels)
+                preds = torch.sigmoid(outputs) > 0.5
+                # labels are floats 0/1
+                correct += (preds == (labels > 0.5)).sum().item()
+                total += labels.numel()
+            else:
+                loss = self.criterion(outputs, labels)
+                _, predicted = torch.max(outputs.data, 1)
+                total += labels.size(0)
+                correct += (predicted == labels).sum().item()
             loss.backward()
             self.optimizer.step()
             
             total_loss += loss.item()
-            _, predicted = torch.max(outputs.data, 1)
-            total += labels.size(0)
-            correct += (predicted == labels).sum().item()
         
-        return total_loss / len(loader), 100 * correct / total
+        # compute accuracy (for multi-label use micro accuracy)
+        acc = 100 * correct / total if total > 0 else 0.0
+        return total_loss / len(loader), acc
     
     def validate(self, loader):
         self.model.eval()
@@ -47,24 +59,31 @@ class ModelTrainer:
             for sequences, labels in loader:
                 sequences, labels = sequences.to(self.device), labels.to(self.device)
                 outputs = self.model(sequences)
-                loss = self.criterion(outputs, labels)
+                if self.multi_label:
+                    loss = self.criterion(outputs, labels)
+                    preds = torch.sigmoid(outputs) > 0.5
+                    correct += (preds == (labels > 0.5)).sum().item()
+                    total += labels.numel()
+                else:
+                    loss = self.criterion(outputs, labels)
+                    _, predicted = torch.max(outputs.data, 1)
+                    total += labels.size(0)
+                    correct += (predicted == labels).sum().item()
                 
                 total_loss += loss.item()
-                _, predicted = torch.max(outputs.data, 1)
-                total += labels.size(0)
-                correct += (predicted == labels).sum().item()
         
-        return total_loss / len(loader), 100 * correct / total
+        acc = 100 * correct / total if total > 0 else 0.0
+        return total_loss / len(loader), acc
     
     def fit(self, train_loader, val_loader, epochs):
         for epoch in range(epochs):
             train_loss, train_acc = self.train_epoch(train_loader)
             val_loss, val_acc = self.validate(val_loader)
-            
+
             self.scheduler.step(val_loss)
-            
+
             print(f"Epoch {epoch+1}/{epochs} | Train: {train_loss:.4f}/{train_acc:.2f}% | Val: {val_loss:.4f}/{val_acc:.2f}%")
-            
+
             if val_loss < self.best_val_loss:
                 self.best_val_loss = val_loss
                 self.best_model_state = self.model.state_dict().copy()
